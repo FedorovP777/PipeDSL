@@ -1,0 +1,19 @@
+tasks:
+  - type: http
+    name: Fist
+    method: get
+    url: 'https://api.test.com/1'
+    id: first
+    single: false
+
+  - type: http
+    name: Second
+    method: get
+    url: 'https://api.test.com/2'
+    id: second
+    single: false
+
+  - type: pipeline
+    name: Two job
+    id: open_movies
+    pipeline: "first() >> second()"

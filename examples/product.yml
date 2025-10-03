@@ -1,0 +1,49 @@
+.default_headers: &default_headers
+  - [ 'Accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7' ]
+  - [ 'User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36' ]
+  - [ 'Accept-Language:', 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7' ]
+tasks:
+  - type: http
+    name: Раздел Сериалы
+    url: 'https://api.test.tech/gateway/v1/cms/content/series/?limit=20&offset=!{{1}}'
+    headers:
+      - *default_headers
+    method: get
+    id: series
+    single: false
+    json_extractor_props:
+      ids: '$.results[*].id'
+      count: 'count'
+
+  - type: http
+    name: Сериал
+    url: 'https://api.test.tech/gateway/v1/cms/content/series/!{{1}}/'
+    headers:
+      - *default_headers
+    method: get
+    id: series_by_id
+    single: false
+    json_extractor_props:
+      id: 'id'
+      slug: 'slug'
+
+
+  - type: http
+    name: Сео шаблон сериала
+    url: 'https://api.test.tech/gateway/v1/cms/seo/texts/watch/series_!{{1}}_!{{2}}/'
+    headers:
+      - *default_headers
+    method: get
+    id: seo_template_series_by_id
+    single: false
+
+
+  - type: pipeline
+    name: Открытие сериала из каталога
+    id: open_series
+    pipeline: "series(pipeline_context.start_offset) >> [range(pipeline_context.start_offset,series.count,pipeline_context.page_size)] * [series($1) >> [series.ids] * [series_by_id($1) >> seo_template_series_by_id(series_by_id.id,series_by_id.slug)]]"
+    pipeline_context:
+      endpoint: 'https://api.amediateka.tech'
+      start_offset: '0'
+      page_size: '60'
+

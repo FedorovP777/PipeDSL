@@ -1,0 +1,26 @@
+[project]
+name = "pipedsl"
+version = "0.1.0"
+description = ""
+authors = [
+    { name = "Your Name", email = "you@example.com" }
+]
+readme = "README.md"
+requires-python = ">=3.13,<4.0"
+dependencies = [
+    "pydantic (>=2.10.6,<3.0.0)",
+    "pyyaml (>=6.0.2,<7.0.0)",
+    "nltk (>=3.9.1,<4.0.0)",
+    "pytest (>=8.3.5,<9.0.0)",
+    "jsonpath-ng (>=1.7.0,<2.0.0)",
+    "coverage (>=7.10.6,<8.0.0)",
+    "pytest-cov (>=7.0.0,<8.0.0)"
+]
+
+
+
+
+[build-system]
+requires = ["hatchling >= 1.26"]
+build-backend = "hatchling.build"
+

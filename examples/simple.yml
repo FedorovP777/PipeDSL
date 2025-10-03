@@ -1,0 +1,6 @@
+tasks:
+  - type: http
+    id: 16b4e67a-2f61-4dc2-916a-052c72c58fd5
+    name: Easy Example #1
+    url: https://api.test.com/
+    method: get
