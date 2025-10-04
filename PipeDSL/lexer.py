@@ -7,7 +7,7 @@ from nltk.tree.prettyprinter import TreePrettyPrinter
 from pydantic import BaseModel
 from pydantic import Field
 
-from utils.logger import logger
+from PipeDSL.utils.logger import logger
 
 SYSTEM_FUNCTIONS = {
     "int",
@@ -55,11 +55,11 @@ def get_grammar(function_names: list[str], properties_names: list[str]) -> nltk.
     comma_symbol -> ','
     dot_symbol -> '.'
     space_symbol -> ' '
-    left_bracket -> '(
+    left_bracket -> '('
     right_bracket -> ')'
     right_square_bracket -> ']'
     left_square_bracket -> '['
-    
+
     FUNCTION -> 'pipeline_context'
     FUNCTION -> {" | ".join([f"'{i}'" for i in function_names])}
     PROPS ->{" | ".join([f"'{i}'" for i in properties_names])}

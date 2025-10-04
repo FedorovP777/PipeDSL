@@ -1,0 +1,65 @@
+cache:
+  paths:
+    - venv/
+
+
+stages:
+  - build
+  - tests
+  - release
+
+services:
+  - name: docker:dind
+
+variables:
+  # Use TLS https://docs.gitlab.com/ee/ci/docker/using_docker_build.html#tls-enabled
+  DOCKER_HOST: tcp://docker:2375
+  DOCKER_TLS_CERTDIR: ""
+  DOCKER_DRIVER: overlay2
+  POETRY_VIRTUALENVS_PATH: $CI_PROJECT_DIR/venv
+  IMAGE_TAG: $CI_REGISTRY_IMAGE:latest
+
+BuildImage:
+  stage: build
+  image: docker:27.4.1
+  script:
+    - echo $IMAGE_TAG
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - docker build -t $IMAGE_TAG --build-arg BUILDKIT_INLINE_CACHE=1 --cache-from $CI_REGISTRY_IMAGE:latest .
+    - docker push $IMAGE_TAG
+  variables:
+    DOCKER_BUILDKIT: 1
+
+tests:
+  stage: tests
+  image:
+    name: $IMAGE_TAG
+    entrypoint: [ "" ]
+  script:
+    - python --version  # For debugging
+    #    - python -m pip install --upgrade pip setuptools hatchling build
+    - python -m pip install -e .
+    - python -m pytest --cov=. -s .
+  allow_failure: true
+
+mypy:
+  stage: tests
+  image:
+    name: python:3.13-alpine
+    entrypoint: [ "" ]
+  script:
+    - pip install mypy types-PyYAML
+    - mypy .
+  allow_failure: true
+
+release:
+  stage: release
+  image:
+    name: $IMAGE_TAG
+    entrypoint: [ "" ]
+  script:
+    - cd /PipeDSL && python -m build
+    - ls -lah
+    - cd /PipeDSL && python -m build && python -m twine upload dist/*  --username __token__ --password $TWINE_PASSWORD
+
+

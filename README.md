@@ -1,219 +1,181 @@
-# PipeDSL: Pipeline Framework
+# PipeDSL — Declarative HTTP Pipeline Orchestration
 
-A lightweight and flexible pipeline framework for orchestrating HTTP requests using YAML configuration.
+PipeDSL is a lightweight framework for defining and executing sequences of HTTP requests using a YAML-based DSL. It supports chaining tasks, passing data between steps, parallel execution, and extracting structured values from JSON responses using JSONPath.
 
-## 🧩 What is PipeDSL?
-
-**PipeDSL** is a minimalistic yet powerful tool that allows you to define and run sequences of HTTP requests as pipelines using simple YAML
-files. It enables chaining, parallel execution, dynamic argument passing, and data extraction from responses using JSONPath expressions.
-
-Whether you're building integrations, automating API workflows, or testing endpoints — Kiki helps streamline your tasks with ease.
+Use PipeDSL to:
+- Automate multi-step API workflows
+- Build integration or end-to-end tests
+- Fetch and transform data across multiple endpoints
+- Define complex request pipelines with minimal code
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
+
+Install the package:
 
 ```bash
-pip install PipeDSL
+pip install pipedsl
 ```
+
+Run a pipeline from a YAML string:
 
 ```python
-from PipeDSL import YamlTaskReader
-from PipeDSL import TaskScheduler
+import asyncio
+from pipedsl import YamlTaskReader, TaskScheduler
 
-tasks = YamlTaskReader.generate_tasks(config_body=....)
-results = TaskScheduler.schedule(tasks)
+config = """
+tasks:
+  - type: http
+    id: get_user
+    name: Fetch user
+    url: https://httpbin.org/get
+    method: get
+    single: false
 
-for task, result_task in results:
-    ....
+  - type: http
+    id: log_action
+    name: Log action
+    url: https://httpbin.org/post
+    method: post
+    body: '{"source": "!{{1}}"}'
+    single: false
+
+  - type: pipeline
+    id: user_flow
+    name: User workflow
+    pipeline: "get_user() >> log_action(get_user.url)"
+"""
+
+async def main():
+    tasks = YamlTaskReader.generate_tasks(config_body=config)
+    async for task, result in TaskScheduler.schedule(tasks):
+        print(f"Completed {task.id} → {result.payload_type}")
+
+asyncio.run(main())
 ```
+
+> Note: `TaskScheduler.schedule()` is an async generator. Use `async for` to consume results.
 
 ---
 
-## 📁 Configuration Examples
+## Writing Pipelines
 
-### Simple Single Job
+### Basic HTTP Task
 
 ```yaml
 tasks:
   - type: http
-    id: 16b4e67a-2f61-4dc2-916a-052c72c58fd5
-    name: Easy Example #1
-    url: https://api.test.com/
+    id: healthcheck
+    name: Health check
+    url: https://api.example.com/health
     method: get
 ```
 
-### Two Sequential Jobs
+### Sequential Execution
 
 ```yaml
+tasks:
   - type: http
-    name: Fist
-    url: 'https://api.test.com/1'
-    id: first
-    single: false
-
-  - type: http
-    name: Second
-    url: 'https://api.test.com/2'
-    id: second
-    single: false
-
-  - type: pipeline
-    name: Two job
-    id: open_movies
-    pipeline: "first() >> second()"
-```
-
-### Passing Arguments Between Tasks
-
-```yaml
-  - type: http
-    name: Get item
-    url: '!{{1}}/get-some'
-    id: first
-    single: false
+    id: login
+    url: https://api.example.com/login
+    method: post
+    body: '{"email": "user@example.com"}'
     json_extractor_props:
-      id: 'id'
+      token: 'access_token'
+    single: false
 
   - type: http
-    name: Get item2
-    url: '!{{1}}/get-some/!{{2}}'
-    id: second
+    id: profile
+    url: https://api.example.com/profile
+    method: get
+    headers:
+      - ["Authorization", "Bearer !{{1}}"]
     single: false
 
   - type: pipeline
-    name: Pipeline
-    id: pipeline
-    pipeline: "first(pipeline_context.endpoint) >> second(pipeline_context.endpoint, first.id)"
-    pipeline_context:
-      endpoint: 'https://api.test.com/'
+    id: auth_flow
+    pipeline: "login() >> profile(login.token)"
 ```
 
-### Group Task Execution with Different Arguments
+The expression `profile(login.token)` passes the `token` field extracted from the `login` response as the first argument (`!{{1}}`) to the `profile` request.
+
+### Parallel Execution with Product Operator
 
 ```yaml
+tasks:
   - type: http
-    name: Get item
-    url: 'https://api.test.com/get-some'
-    id: first
-    single: false
+    id: list_ids
+    url: https://api.example.com/items
+    method: get
     json_extractor_props:
       ids: '$.results[*].id'
+    single: false
 
   - type: http
-    name: Get item2
-    url: '!https://api.test.com/get-some/!{{1}}?param=!{{2}}'
-    id: second
+    id: fetch_item
+    url: https://api.example.com/items/!{{1}}
+    method: get
     single: false
 
   - type: pipeline
-    name: Pipeline
-    id: pipeline
-    pipeline: "first() >> [first.ids, pipeline_context.params] * [second($1, $2)]"
-    pipeline_context:
-      params:
-        - a
-        - b
+    id: bulk_fetch
+    pipeline: "list_ids() >> [list_ids.ids] * [fetch_item($1)]"
+```
+
+The syntax `[A] * [B($1)]` means: for each element in `A`, execute `B`, substituting the element as `$1`. This enables fan-out patterns and bulk operations.
+
+---
+
+## Task Reference
+
+| Field | Required | Description |
+|------|----------|-------------|
+| `id` | Yes | Unique identifier (used in DSL expressions) |
+| `name` | No | Human-readable label |
+| `type` | Yes | Either `http` or `pipeline` |
+| `single` | No | If `true` (default), the task runs standalone. If `false`, it can be called from a pipeline. |
+| `url`, `method`, `headers`, `body` | Yes (for `http`) | Standard HTTP request parameters |
+| `json_extractor_props` | No | Maps `{name: JSONPath}` to extract values from JSON responses |
+| `pipeline_context` | No (for `pipeline`) | Key-value store available as `pipeline_context.key` in DSL |
+
+Placeholders like `!{{1}}`, `!{{2}}`, etc., are replaced with positional arguments during execution.
+
+---
+
+## How It Works
+
+1. **Parsing**: The DSL string (e.g., `login() >> profile(login.token)`) is tokenized and parsed into an abstract syntax tree (AST) using NLTK and a context-free grammar.
+2. **Execution**: Tasks are scheduled asynchronously. Results are stored in an execution context under the task’s `id`.
+3. **Data Flow**: Expressions like `task.property` resolve to extracted values from prior responses.
+4. **Parallelism**: The product operator (`[X] * [Y($1)]`) expands into a Cartesian product and executes sub-pipelines in parallel.
+
+---
+
+## Architecture
+
+- **`YamlTaskReader`**: Reads YAML and builds task definitions with compiled ASTs for pipelines.
+- **`TaskScheduler`**: Orchestrates execution of top-level (`single: true`) tasks.
+- **`PipelineExecutor`**: Interprets the AST, manages context, and handles sequential/parallel execution.
+- **`HttpRequestExecutor`**: Sends requests via `aiohttp` and processes responses.
+
+All core models are immutable (Pydantic with `frozen=True`), and the system is fully typed.
+
+---
+
+## Development
+
+To set up a development environment:
+
+```bash
+git clone https://github.com/yourname/PipeDSL.git
+cd PipeDSL
+pip install -e .
+pytest
 ```
 
 ---
 
-## ⚙️ Task Properties Reference
+## License
 
-| Property               | Description                                                                                                    |
-|------------------------|----------------------------------------------------------------------------------------------------------------|
-| `json_extractor_props` | JSONPath expressions to extract values from response (see [jsonpath-ng](https://github.com/h2non/jsonpath-ng)) |
-| `type`                 | Either `http` or `pipeline`                                                                                    |
-| `name`                 | Human-readable task name (for reports)                                                                         |
-| `id`                   | Unique identifier for the task (no spaces allowed)                                                             |
-| `single`               | Boolean; set to `true` if the task not call in pipeline                                                        |
-| `url`                  | Required for HTTP-type tasks                                                                                   |
-
----
-
-## 🧠 Supported Features
-
-- ✅ Sequential & parallel task execution
-- ✅ Dynamic value injection using `!{{n}}` placeholders
-- ✅ Response parsing via [JSONPath-ng](https://github.com/h2non/jsonpath-ng)
-- ✅ Complex pipeline definitions using DSL-like syntax
-- ✅ Context-aware execution with `pipeline_context`
-- ✅ Docker-ready and easy to deploy
-
----
-
-## 📐 Architecture Overview
-
-```plantuml
-@startuml
-class Task {
-id str
-name str
-type str
-single bool
-payload HttpRequest | Pipeline
-}
-
-class TaskResult<T> {
-id str
-task_id str
-created_at: str
-payload_type: str
-request: HttpRequest | None
-payload: T
-is_throw: bool
-error_description: str
-}
-
-class HttpRequest{
-url: str
-headers: dict
-method: str
-timeout: float
-body: str | None 
-json_extractor_props: dict
-}
-
-class Pipeline{
-task_id: str
-pipeline: str
-pipeline_context: dict[str, str]
-ast: tuple[Context, list[Job]] | None = None
-}
-
-class YamlTaskReaderService{
-{static} list[Tasks] generate_tasks()
-}
-
-class TaskScheduler{
-{static}  AsyncGenerator[tuple[Task, TaskResult], Any] schedule(list[Tasks])
-}
-
-class TaskResultHandler{
-{static} handle_completed_tasks(AsyncGenerator[tuple[Task, TaskResult], Any])
-}
-
-Task *-- TaskResult
-Task *-- HttpRequest
-Task *-- Pipeline
-TaskResult *-- HttpRequest
-YamlTaskReaderService o- Task
-TaskScheduler --> Task
-TaskScheduler o- TaskResult
-TaskResultHandler o- TaskResult
-TaskResultHandler o- Task
-
-together {
-  class YamlTaskReaderService
-  class TaskScheduler
-  class TaskResultHandler
-}
-
-@enduml
-
-
-```
-
-## 🛡️ License
-
-This project is licensed under the **Apache License, Version 2.0** – see [LICENSE](LICENSE) for details.
+Apache License 2.0. See [LICENSE](LICENSE) for details.
