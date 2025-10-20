@@ -4,42 +4,49 @@ import datetime
 import decimal
 import itertools
 import json
-import time
 import uuid
-from collections.abc import Callable, AsyncGenerator, AsyncIterable
-from functools import reduce, partial, singledispatch, singledispatchmethod
-from operator import concat
-from typing import Any
+from collections.abc import Callable, AsyncGenerator, Awaitable, Iterable
+from functools import partial, singledispatch, singledispatchmethod
+from typing import Any, Protocol, Sequence, TypeVar, cast, Never
 
 import aiohttp
 
+from PipeDSL import models
 from PipeDSL.lexer import Job, CallFunction, ResultFunction, Product, PositionalArg
 from PipeDSL.models import HttpRequest, Pipeline, Task, TaskResult, JsonResponse, TextResponse, PipelineJobResult, PipelineResult, \
-    TaskPayloadTypesAssocInv, TaskPayloadTypes, EmptyResponse
+    TaskPayloadTypesAssocInv, EmptyResponse
 from PipeDSL.utils import http_client
-# from utils.http_client import AsyncHttpClient, AioHttpRequestExecution, json_response_handler
 from PipeDSL.utils.logger import logger
-from PipeDSL.utils.utils import json_extend_extractor
+from PipeDSL.utils.utils import json_extend_extractor, timeit
+
+
+class DslFunction(Protocol):
+    name: str
+
+    async def __call__(self) -> Any: ...
 
 
 class DslFunctionUuid:
-    name: "uuid"
+    name: str = "uuid"
 
-    async def __call__(self):
+    async def __call__(self) -> str:
         return str(uuid.uuid4())
 
 
-class DslFunctionConcat:
-    name: "concat"
+DslFunctionConcatSeqType = TypeVar("DslFunctionConcatSeqType", bound=Sequence[str])
 
-    async def __call__(self, *args, **kwargs):
-        return str(reduce(concat, args, ""))
+
+class DslFunctionConcat:
+    name: str = "concat"
+
+    async def __call__(self, *args: Any, **kwargs: Any) -> str:
+        return "".join(str(arg) for arg in args)
 
 
 class DslFunctionDiv:
-    name: "div"
+    name: str = "div"
 
-    async def __call__(self, *args, **kwargs):
+    async def __call__(self, *args: Any, **kwargs: Any) -> float:
         if isinstance(args[0], list):
             return float(args[0][0]) / float(args[1])
 
@@ -49,7 +56,7 @@ class DslFunctionDiv:
 class DslFunctionRange:
     name: "range"
 
-    async def __call__(self, *args, **kwargs):
+    async def __call__(self, *args: Any, **kwargs: Any) -> list[int]:
         if len(args) == 3:
             start, stop, step = args
             if isinstance(start, list):
@@ -62,54 +69,81 @@ class DslFunctionRange:
         return []
 
 
-SYSTEM_FUNCTION_REGISTRY: dict[str, Callable[[...], any]] = {
-    "uuid": DslFunctionUuid(),
+SYSTEM_FUNCTION_REGISTRY: dict[str, Callable[..., Awaitable[Any]]] = {
+    "uuid": cast(Callable[..., Awaitable[Any]], DslFunctionUuid()),
     "concat": DslFunctionConcat(),
     "div": DslFunctionDiv(),
     "range": DslFunctionRange(),
 }
 
+GetTaskById = TypeVar("GetTaskById", bound=Task[Any])
 
-def get_task_by_id(tasks: list[Task], _id: str):
+
+def get_task_by_id(tasks: Iterable[GetTaskById], _id: str) -> GetTaskById:
     for task in tasks:
         if task.id == _id:
             return task
+    raise Exception
 
 
-sem = asyncio.Semaphore(10)
-
-
-# work with shared resource
+ClientType = http_client.AsyncHttpClient[
+    http_client.JsonResponse | http_client.TextResponse,  # now from models
+    Never,
+    Never
+]
 
 
 class HttpRequestExecutor:
 
+    @singledispatchmethod
+    @staticmethod
+    def make_request(
+            response: Any,
+            execution_time: decimal.Decimal,
+    ) -> models.JsonResponse | models.TextResponse:
+        raise NotImplementedError(f"Cannot handle a {type(response)}")
+
+    @make_request.register(http_client.JsonResponse)
+    @staticmethod
+    def _(response: http_client.JsonResponse, execution_time: decimal.Decimal) -> models.JsonResponse:
+        return JsonResponse(
+            headers=response.headers,
+            body=json.dumps(response.body),
+            status_code=response.status_code,
+            execution_time=execution_time,
+        )
+
+    @make_request.register(http_client.TextResponse)
+    @staticmethod
+    def _(response: http_client.TextResponse, execution_time: decimal.Decimal) -> models.TextResponse:
+        return TextResponse(
+            headers=response.headers,
+            body=json.dumps(response.body),
+            status_code=response.status_code,
+            execution_time=execution_time,
+        )
+
+    @staticmethod
+    async def execute_with_lock(http_request: HttpRequest, lock: asyncio.Semaphore) -> models.JsonResponse | models.TextResponse:
+        logger.debug(f"Start execute http request: {http_request.url}")
+
+        async with lock:
+            async with aiohttp.ClientSession() as session:
+                client: ClientType = http_client.AsyncHttpClient(
+                    http_client.AioHttpRequestExecution(session), http_client.response_handler, None)
+                with timeit() as get_execution_time:
+                    response = await client.execute_request(http_request)
+                    return HttpRequestExecutor.make_request(response, get_execution_time())
+
     @staticmethod
     async def execute(http_request: HttpRequest) -> JsonResponse | TextResponse:
         logger.debug(f"Start execute http request: {http_request.url}")
-        # await asyncio.wait_for(sem.acquire(), timeout=200)
-        async with sem:
-            async with aiohttp.ClientSession() as session:
-                client = http_client.AsyncHttpClient(http_client.AioHttpRequestExecution(session), http_client.response_handler, None)
-                t1_stop = time.perf_counter()
+        async with aiohttp.ClientSession() as session:
+            client: ClientType = http_client.AsyncHttpClient(http_client.AioHttpRequestExecution(session), http_client.response_handler,
+                                                             None)
+            with timeit() as get_execution_time:
                 response = await client.execute_request(http_request)
-                t2_stop = time.perf_counter()
-                execution_time = decimal.Decimal(t2_stop - t1_stop).quantize(decimal.Decimal('.001'), rounding=decimal.ROUND_DOWN)
-                if isinstance(response, http_client.JsonResponse):
-                    return JsonResponse(
-                        headers=response.headers,
-                        body=json.dumps(response.body),
-                        status_code=response.status_code,
-                        execution_time=execution_time,
-                    )
-                if isinstance(response, http_client.TextResponse):
-                    return TextResponse(
-                        headers=response.headers,
-                        body=response.body,
-                        status_code=response.status_code,
-                        execution_time=execution_time)
-
-
+                return HttpRequestExecutor.make_request(response, get_execution_time())
 
     @staticmethod
     def compile_http_request_template(job: HttpRequest, args: list[str]) -> HttpRequest:
@@ -117,7 +151,7 @@ class HttpRequestExecutor:
         for idx, arg in enumerate(args, 1):
 
             if not isinstance(arg, str):
-                logger.warning(f"Expected str, got {type(arg)}")
+                logger.warning(f"Expected str, got {type(arg)} {arg}")
 
             arg = str(arg)
             tmpl = "!{{%s}}" % idx
@@ -136,17 +170,19 @@ counter = 0
 class PipelineExecutor:
 
     @staticmethod
-    async def execute(task: Task[Pipeline], tasks: list[Task]) -> list[PipelineJobResult]:
-        pipeline_context = {
+    async def execute(task: Task[Pipeline], tasks: list[Task[Pipeline] | Task[HttpRequest]]) -> list[PipelineJobResult]:
+        pipeline_context: dict[str, Any] = {
             "tasks": tasks,
-            "http_rps_limiter": asyncio.Semaphore(task.payload.http_rps_limit),
-            "strategy": "parallel"
         }
+        if task.payload.http_rps_limit:
+            pipeline_context["http_rps_limiter"] = asyncio.Semaphore(task.payload.http_rps_limit)
+            pipeline_context["strategy"] = "parallel"
+
         results: list[PipelineJobResult] = []
         assert task.payload.ast
         _, jobs = task.payload.ast
 
-        execution_context = {"pipeline_context": task.payload.pipeline_context}
+        execution_context: dict[str, dict[str, Any]] = {"pipeline_context": task.payload.pipeline_context}
 
         for job in jobs:
             task_result = await PipelineExecutor.execute_pipeline_job(job, pipeline_context, execution_context)
@@ -157,53 +193,61 @@ class PipelineExecutor:
     @singledispatchmethod
     @staticmethod
     async def execute_pipeline_job(
-            job: Job,
-            pipeline_context: dict,
-            execution_context: dict,
-            group_args_in=None
+            job: Job[Product],
+            pipeline_context: dict[str, Any],
+            execution_context: dict[str, dict[str, Any]],
+            group_args_in: list[Any] | None = None
     ) -> list[PipelineJobResult]:
 
         raise NotImplementedError(f"Cannot handle a {type(job)}")
 
     @execute_pipeline_job.register
     @staticmethod
-    async def _(job: Job[Product], pipeline_context: dict, execution_context: dict, group_args_in=None) -> list[PipelineJobResult]:
+    async def _(
+            job: Job[Product],
+            pipeline_context: dict[str, Any],
+            execution_context: dict[str, dict[str, Any]],
+            group_args_in: list[Any] | None = None
+    ) -> list[PipelineJobResult]:
 
-        product_args = []
+        product_args = [
+            await PipelineExecutor.handle_argument_function(
+                op.payload,
+                pipeline_context,
+                execution_context,
+                group_args_in
+            )
+            for op in job.payload.cartesian_operands
+        ]
+        result: list[PipelineJobResult] = []
+        parallels_strategy = "strategy" in pipeline_context and pipeline_context["strategy"] == "parallel"
 
-        for i in job.payload.l_group:
-            product_args.append(
-                await PipelineExecutor.handle_argument_function(i.payload, pipeline_context, execution_context, group_args_in))
-
-        result = []
-        optimization = pipeline_context["strategy"] == "parallel"
-
-        async def execute_jobs(jobs, params):
+        async def execute_jobs(jobs: list[Job[Product] | Job[CallFunction]], params: Any) -> list[PipelineJobResult]:
             nonlocal execution_context
-            result_ = []
+            _result: list[PipelineJobResult] = []
             e = copy.deepcopy(execution_context)
             for _job in jobs:
-                result_.extend(await PipelineExecutor.execute_pipeline_job(_job, pipeline_context, e, params))
-            return result_
+                _result.extend(await PipelineExecutor.execute_pipeline_job(_job, pipeline_context, e, params))
+            return _result
 
-        if optimization:
-            tasks = [execute_jobs(job.payload.r_group, r_group_positional_args) for r_group_positional_args in
+        if parallels_strategy:
+            tasks = [execute_jobs(job.payload.pipeline, pipeline_positional_args) for pipeline_positional_args in
                      itertools.product(*product_args)]
             for i in await asyncio.gather(*tasks):
                 result.extend(i)
-
-
         else:
-            for r_group_positional_args in itertools.product(*product_args):
-                for sub_job in job.payload.r_group:
+            for pipeline_positional_args in itertools.product(*product_args):
+                for sub_job in job.payload.pipeline:
                     result.extend(
-                        await PipelineExecutor.execute_pipeline_job(sub_job, pipeline_context, execution_context, r_group_positional_args))
+                        await PipelineExecutor.execute_pipeline_job(sub_job, pipeline_context, execution_context, pipeline_positional_args))
 
         return result
 
     @execute_pipeline_job.register
     @staticmethod
-    async def _(job: Job[CallFunction], pipeline_context: dict, execution_context, group_args=None) -> list[PipelineJobResult]:
+    async def _(job: Job[CallFunction] | Job[CallFunction], pipeline_context: dict[str, Any], execution_context: dict[str, dict[str, Any]],
+                group_args: list[Any] | None = None) -> list[
+        PipelineJobResult]:
         args = []
         sub_task = get_task_by_id(pipeline_context["tasks"], job.payload.name)
 
@@ -211,9 +255,9 @@ class PipelineExecutor:
             raise SyntaxError(f"Undefined function: {job.payload.name}")
 
         tasks = []
-        optimization = False
+        parallels_execution = "http_rps_limiter" in pipeline_context and pipeline_context["http_rps_limiter"]
 
-        if optimization:
+        if parallels_execution:
             for i in job.payload.arguments:
                 tasks.append(PipelineExecutor.handle_argument_function(i, pipeline_context, copy.deepcopy(execution_context), group_args))
 
@@ -237,7 +281,11 @@ class PipelineExecutor:
         compiled_job = HttpRequestExecutor.compile_http_request_template(sub_task.payload, args)
         logger.debug(f"Request compiled: {job}")
 
-        consumed_task = await HttpRequestExecutor.execute(compiled_job)
+        if parallels_execution:
+            consumed_task = await HttpRequestExecutor.execute_with_lock(compiled_job, pipeline_context["http_rps_limiter"])
+        else:
+            consumed_task = await HttpRequestExecutor.execute(compiled_job)
+
         task_result = PipelineJobResult(
             id=str(uuid.uuid4()),
             created_at=str(datetime.datetime.now().isoformat()),
@@ -246,77 +294,176 @@ class PipelineExecutor:
             result=consumed_task,
             args=[str(i) for i in args],
         )
-        execution_context[job.payload.name] = {k: json_extend_extractor(v, consumed_task.body) for k, v in
-                                               sub_task.payload.json_extractor_props.items()}
+        if isinstance(consumed_task, JsonResponse):
+            execution_context[job.payload.name] = {k: json_extend_extractor(v, consumed_task.body) for k, v in
+                                                   sub_task.payload.json_extractor_props.items()}
         return [task_result]
 
     @staticmethod
-    async def execute_function(pipeline_context: dict, execution_context, fn: CallFunction, group_args=None):
+    async def execute_function(
+            pipeline_context: dict[str, Any],
+            execution_context: dict[str, dict[str, Any]],
+            fn: CallFunction,
+            group_args: list[Any] | None = None
+    ) -> Any:
         args = []
 
         for i in fn.arguments:
             args.append(await PipelineExecutor.handle_argument_function(i, pipeline_context, execution_context, group_args))
-        fn = SYSTEM_FUNCTION_REGISTRY[fn.name]
-        return await fn(*args)
+        _fn = SYSTEM_FUNCTION_REGISTRY[fn.name]
+        return await _fn(*args)
 
     @singledispatch
     @staticmethod
-    async def handle_argument_function(arg, pipeline_context: dict, execution_context, group_args=None):
+    async def handle_argument_function(
+            arg: ResultFunction | CallFunction | PositionalArg,
+            pipeline_context: dict[str, Any],
+            execution_context: dict[str, dict[str, Any]],
+            group_args: list[Any] | None = None
+    ) -> Any:
         raise NotImplementedError(f"Cannot handle argument type {type(arg)}")
 
-    @handle_argument_function.register
+    @handle_argument_function.register(ResultFunction)
     @staticmethod
-    async def handle_argument_function_(arg: ResultFunction, pipeline_context: dict, execution_context, group_args=None):
+    async def _(
+            arg: ResultFunction,
+            pipeline_context: dict[str, Any],
+            execution_context: dict[str, dict[str, Any]],
+            group_args: list[Any] | None = None
+    ) -> Any:
         return execution_context[arg.name][arg.property]
 
-    @handle_argument_function.register
+    @handle_argument_function.register(CallFunction)
     @staticmethod
-    async def handle_argument_function_(arg: CallFunction, pipeline_context: dict, execution_context, group_args=None):
+    async def _(
+            arg: CallFunction,
+            pipeline_context: dict[str, Any],
+            execution_context: dict[str, dict[str, Any]],
+            group_args: list[Any] | None = None
+    ) -> Any:
         result = await PipelineExecutor.execute_function(pipeline_context, execution_context, arg, group_args)
         return result
 
-    @handle_argument_function.register
+    @handle_argument_function.register(PositionalArg)
     @staticmethod
-    async def handle_argument_function_(arg: PositionalArg, pipeline_context: dict, execution_context, group_args):
-        return group_args[arg.idx - 1]
+    async def _(
+            arg: PositionalArg,
+            pipeline_context: dict[str, Any],
+            execution_context: dict[str, dict[str, Any]],
+            group_args: list[Any] | None
+    ) -> Any:
+        if group_args:
+            return group_args[arg.idx - 1]
+
+        raise Exception("Invalid positional argument")
 
 
-ExecuteTaskResult = AsyncIterable[tuple[Task, TaskResult]]
+PayloadTypes = (
+        EmptyResponse |
+        PipelineResult |
+        JsonResponse |
+        TextResponse
+)
+
+ConcreteTaskResult = (
+        TaskResult[EmptyResponse] |
+        TaskResult[PipelineResult] |
+        TaskResult[JsonResponse] |
+        TaskResult[TextResponse]
+)
+
+ExecuteTaskResult = AsyncGenerator[tuple[Task[Pipeline] | Task[HttpRequest], ConcreteTaskResult]]
+ExecuteHttpTaskResult = tuple[Task[HttpRequest], TaskResult[EmptyResponse] |
+                                                 TaskResult[JsonResponse] |
+                                                 TaskResult[TextResponse]]
+
+
+@singledispatch
+def get_task_result_type(payload: PayloadTypes) -> type[ConcreteTaskResult]:
+    raise NotImplementedError(f"Cannot handle type {type(payload)}")
+
+
+@get_task_result_type.register(JsonResponse)
+def _(payload: JsonResponse) -> type[TaskResult[JsonResponse]]:
+    return TaskResult[JsonResponse]
+
+
+@get_task_result_type.register(TextResponse)
+def _(payload: TextResponse) -> type[TaskResult[TextResponse]]:
+    return TaskResult[TextResponse]
+
+
+@get_task_result_type.register(PipelineResult)
+def _(payload: PipelineResult) -> type[TaskResult[PipelineResult]]:
+    return TaskResult[PipelineResult]
+
+
+@get_task_result_type.register(EmptyResponse)
+def _(payload: EmptyResponse) -> type[TaskResult[EmptyResponse]]:
+    return TaskResult[EmptyResponse]
+
+
+def make_task_result(
+        *,
+        task_id: str,
+        payload: PayloadTypes,
+        request: HttpRequest | None = None,
+        args: list[str] | None = None,
+        is_throw: bool = False,
+        error_description: str = "",
+        status: str = "done",
+) -> ConcreteTaskResult:
+    payload_type = TaskPayloadTypesAssocInv.get(type(payload))
+
+    if payload_type is None:
+        raise ValueError(f"Unsupported payload type: {type(payload)}")
+
+    cls = get_task_result_type(payload)
+
+    return cls(
+        id=str(uuid.uuid4()),
+        created_at=str(datetime.datetime.now().isoformat()),
+        task_id=task_id,
+        payload=payload,
+        payload_type=payload_type,
+        request=request,
+        args=args or [],
+        is_throw=is_throw,
+        error_description=error_description,
+        status=status,
+    )
 
 
 class TaskScheduler:
 
     @staticmethod
-    async def schedule(tasks: list[Task]) -> AsyncGenerator[tuple[Task, TaskResult], Any]:
+    async def schedule(tasks: list[Task[Pipeline] | Task[HttpRequest]]) -> ExecuteTaskResult:
         _get_task_by_id = partial(get_task_by_id, tasks)
-        for task in tasks:
-            if not task.single:
-                continue
 
-            async for i in TaskScheduler.execute_task(task, tasks):
-                yield i
+        for task in filter(lambda x:  x.is_singleton, tasks):
+
+            if isinstance(task.payload, Pipeline):
+                async for x in TaskScheduler._execute_pipeline_task(task, tasks):
+                    yield x
+            elif isinstance(task.payload, HttpRequest):
+                result = await TaskScheduler._execute_http_request_task(task)
+                yield result
+            else:
+                raise NotImplementedError(...)
 
         logger.info(f"Execute tasks done, count tasks {len(tasks)}")
 
-    @singledispatch
     @staticmethod
-    async def execute_task(task: Task, tasks: list[Task]) -> ExecuteTaskResult:
-        raise NotImplementedError(f"Task type not implemented: {type(task)}")
-
-    @execute_task.register
-    @staticmethod
-    async def _execute_task(task: Task[Pipeline], tasks: list[Task]) -> ExecuteTaskResult:
+    async def _execute_pipeline_task(task: Task[Pipeline], tasks: list[Task[Pipeline] | Task[HttpRequest]]) -> ExecuteTaskResult:
         _get_task_by_id = partial(get_task_by_id, tasks)
         job_result_ids = []
+
         try:
             jobs = await PipelineExecutor.execute(task, tasks)
         except TimeoutError as e:
-            yield task, TaskResult[EmptyResponse](
-                id=str(uuid.uuid4()),
-                created_at=str(datetime.datetime.now().isoformat()),
+            yield task, make_task_result(
                 task_id=task.id,
-                payload=None,
-                payload_type=TaskPayloadTypes.EMPTY,
+                payload=PipelineResult(task_id=task.id, status="fail"),
                 is_throw=True,
                 error_description="TimeoutError",
                 status="fail"
@@ -327,48 +474,39 @@ class TaskScheduler:
             sub_task = _get_task_by_id(job.task_id)
             result_id = str(uuid.uuid4())
             job_result_ids.append(result_id)
-
-            yield sub_task, TaskResult[type(job.result)](
-                id=result_id,
-                created_at=str(datetime.datetime.now().isoformat()),
-                task_id=sub_task.id,
-                payload_type=TaskPayloadTypesAssocInv[type(job.result)],
+            yield sub_task, make_task_result(
+                task_id=task.id,
                 payload=job.result,
                 request=job.request,
                 args=job.args,
             )
 
-        yield task, TaskResult[PipelineResult](
-            id=str(uuid.uuid4()),
-            created_at=str(datetime.datetime.now().isoformat()),
+        yield task, make_task_result(
             task_id=task.id,
             payload=PipelineResult(task_id=task.id, status="done", job_results=job_result_ids),
-            payload_type=TaskPayloadTypes.PIPELINE,
             status="done"
         )
 
-    @execute_task.register
     @staticmethod
-    async def _execute_task(task: Task[HttpRequest], tasks: list[Task]) -> ExecuteTaskResult:
+    async def _execute_http_request_task(task: Task[HttpRequest]) -> tuple[Task[HttpRequest], ConcreteTaskResult]:
         is_throw = False
         error_description = ""
+        payload: PayloadTypes = EmptyResponse()
 
         try:
             payload = await HttpRequestExecutor.execute(task.payload)
             logger.debug(f"Done execute http request")
+
         except TimeoutError as e:
-            raise e
             error_description = "TimeoutError"
             is_throw = True
-            payload = EmptyResponse
 
-        yield task, TaskResult[type(payload)](
-            id=str(uuid.uuid4()),
-            created_at=str(datetime.datetime.now().isoformat()),
-            request=task.payload,
-            payload=payload,
-            payload_type=TaskPayloadTypesAssocInv[type(payload)],
+        return task, make_task_result(
             task_id=task.id,
+            payload=payload,
+            request=task.payload,
             is_throw=is_throw,
             error_description=error_description,
+            args=[],
+            status="done"
         )

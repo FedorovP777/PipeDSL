@@ -40,7 +40,7 @@ example_json = '''
             "badge_text": "Сохрани цену",
             "highlighted": false,
             "order": 0,
-            "url": "https://api.amediateka.tech/gateway/v1/billing/tariffs/14868/",
+            "url": "https://api.test.tech/gateway/v1/billing/tariffs/14868/",
             "trial": {
                 "duration": 7,
                 "unit": "days"
@@ -98,7 +98,7 @@ example_json = '''
             "badge_text": "",
             "highlighted": false,
             "order": 1,
-            "url": "https://api.amediateka.tech/gateway/v1/billing/tariffs/14934/",
+            "url": "https://api.test.tech/gateway/v1/billing/tariffs/14934/",
             "trial": null,
             "price": [
                 {
@@ -134,7 +134,7 @@ example_json = '''
             "badge_text": "",
             "highlighted": false,
             "order": 2,
-            "url": "https://api.amediateka.tech/gateway/v1/billing/tariffs/14935/",
+            "url": "https://api.test.tech/gateway/v1/billing/tariffs/14935/",
             "trial": null,
             "price": [
                 {
@@ -170,7 +170,7 @@ example_json = '''
             "badge_text": "Выгодно",
             "highlighted": false,
             "order": 3,
-            "url": "https://api.amediateka.tech/gateway/v1/billing/tariffs/14781/",
+            "url": "https://api.test.tech/gateway/v1/billing/tariffs/14781/",
             "trial": null,
             "price": [
                 {

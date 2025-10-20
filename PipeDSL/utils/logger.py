@@ -1,17 +1,21 @@
 import logging
+from typing import Tuple, Any, MutableMapping
 
 
-class CustomAdapter(logging.LoggerAdapter):
-    def process(self, msg, kwargs):
+class CustomAdapter(logging.LoggerAdapter[logging.Logger]):
+    def process(
+            self, msg: str, kwargs: MutableMapping[str, Any]
+    ) -> Tuple[str, MutableMapping[str, Any]]:
         if "extra" in kwargs:
-            return "%s [%s]" % (msg, kwargs.get("extra")), kwargs
-        return "%s" % (msg,), kwargs
+            return f"{msg} [{kwargs.get('extra')}]", kwargs
+        return msg, kwargs
 
 
-logger = logging.getLogger("App")
+base_logger = logging.getLogger("App")
 formatter = logging.Formatter('%(asctime)s - %(filename)s:%(lineno)d - %(levelname)s - %(message)s')
 ch = logging.StreamHandler()
 ch.setFormatter(formatter)
-logger.addHandler(ch)
-logger = CustomAdapter(logger)
-logger.setLevel(logging.DEBUG)
+base_logger.addHandler(ch)
+base_logger.setLevel(logging.DEBUG)
+
+logger: CustomAdapter = CustomAdapter(base_logger)

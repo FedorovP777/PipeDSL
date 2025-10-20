@@ -48,6 +48,7 @@ mypy:
     name: python:3.13-alpine
     entrypoint: [ "" ]
   script:
+    - pip install -e .
     - pip install mypy types-PyYAML
     - mypy .
   allow_failure: true

@@ -8,3 +8,4 @@ COPY pyproject.toml README.md ./
 COPY PipeDSL/ ./PipeDSL/
 
 RUN python -m pip install --upgrade pip setuptools hatchling build twine
+RUN python -m pip install -e .

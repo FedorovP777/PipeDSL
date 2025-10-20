@@ -48,7 +48,7 @@ def test_read_pipeline():
         body: '{ "email": "!{{2}}","pass": "!{{3}}" }'
         timeout: 2
         id: registration
-        single: false
+        is_singleton: false
         json_extractor_props:
           token: 'token'
 

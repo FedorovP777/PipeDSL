@@ -1,11 +1,10 @@
 from decimal import Decimal
 from enum import StrEnum, auto
-from types import NoneType
 from typing import TypeVar, Generic
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
-from PipeDSL.lexer import Context, Job
+from PipeDSL.lexer import Context, Job, CallFunction, Product
 
 T = TypeVar("T")
 
@@ -16,20 +15,23 @@ class Pipeline(BaseModel):
     fetch_strategy: str | None = None
     http_rps_limit: int | None = None
     pipeline_context: dict[str, str | list[str]]
-    ast: tuple[Context, list[Job]] | None = None
+    ast: tuple[Context, list[Job[Product] | Job[CallFunction]]] | None = None
 
 
 class HttpRequest(BaseModel):
     url: str
-    headers: dict
+    headers: dict[str, str]
     method: str
     timeout: float = 300
     body: str | None = None
-    json_extractor_props: dict[str, str] = dict
+    json_extractor_props: dict[str, str] = Field(default_factory=dict)
 
 
-class HttpResponse(BaseModel):
-    headers: dict
+class EmptyResponse(BaseModel):
+    ...
+
+class HttpResponse(EmptyResponse):
+    headers: dict[str, str]
     status_code: int
     execution_time: Decimal
 
@@ -38,12 +40,10 @@ class TextResponse(HttpResponse):
     body: str | None
 
 
-class EmptyResponse(BaseModel):
-    ...
 
 
 class JsonResponse(HttpResponse):
-    body: str | None
+    body: str
 
 
 TaskPayloadType = HttpRequest | Pipeline
@@ -55,7 +55,7 @@ class Task(BaseModel, Generic[TaskType]):
     id: str
     name: str
     type: str
-    single: bool = True
+    is_singleton: bool = True
     payload: TaskType
 
     model_config = ConfigDict(
@@ -87,24 +87,17 @@ class PipelineResult(BaseModel):
     )
 
 
-TaskResultPayload = TypeVar('TaskResultPayload')
-
-
-class TaskResult(BaseModel, Generic[TaskResultPayload]):
+class TaskResult[PayloadT](BaseModel):
     id: str
     created_at: str
     task_id: str
     payload_type: str
     error_description: str = ""
     is_throw: bool = False
-    # payload: TextResponse | JsonResponse | PipelineResult | None
-    payload: TaskResultPayload | None = None
+    payload: PayloadT | None = None
     request: HttpRequest | None = None
     args: list[str] = list()
-
-    model_config = ConfigDict(
-        frozen=True,
-    )
+    model_config = ConfigDict(frozen=True)
 
 
 class TaskPayloadTypes(StrEnum):
@@ -118,7 +111,7 @@ TaskPayloadTypesAssoc = {
     TaskPayloadTypes.HTTP_TEXT: TextResponse,
     TaskPayloadTypes.HTTP_JSON: JsonResponse,
     TaskPayloadTypes.PIPELINE: PipelineResult,
-    TaskPayloadTypes.EMPTY: NoneType
+    TaskPayloadTypes.EMPTY: EmptyResponse
 }
 
 TaskPayloadTypesAssocInv = {v: k for k, v in TaskPayloadTypesAssoc.items()}
@@ -128,7 +121,7 @@ class TaskListsSerializer(BaseModel):
     id: str
     name: str
     type: str
-    single: bool = True
+    is_singleton: bool = True
 
     model_config = ConfigDict(
         frozen=True,
@@ -150,7 +143,3 @@ class TaskListItemResult(BaseModel):
     model_config = ConfigDict(
         frozen=True,
     )
-
-
-class DashboardItemResult(TaskListItemResult):
-    previous_result_id: str | None = None

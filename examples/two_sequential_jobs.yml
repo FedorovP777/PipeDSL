@@ -4,14 +4,14 @@ tasks:
     method: get
     url: 'https://api.test.com/1'
     id: first
-    single: false
+    is_singleton: false
 
   - type: http
     name: Second
     method: get
     url: 'https://api.test.com/2'
     id: second
-    single: false
+    is_singleton: false
 
   - type: pipeline
     name: Two job

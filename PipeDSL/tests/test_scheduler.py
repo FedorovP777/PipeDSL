@@ -12,5 +12,10 @@ def test_execute_task():
     task_params = {"id": "aa", "name": "bb", "type": "http"}
     NotImplementType = TypeVar("NotImplementType")
     task = Task[NotImplementType](**task_params, payload=None)
+
+    async def main(t):
+        async for task, result_task in TaskScheduler.schedule(t):
+            pass
+
     with pytest.raises(NotImplementedError):
-        result = asyncio.run(TaskScheduler.execute_task(task, [task]))
+        result = asyncio.run(main([task]))

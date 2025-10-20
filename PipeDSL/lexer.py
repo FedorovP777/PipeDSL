@@ -1,6 +1,6 @@
 import copy
 from collections.abc import Iterable
-from typing import TypeVar, Generic, Generator
+from typing import TypeVar, Generic, Generator, Any
 
 import nltk
 from nltk.tree.prettyprinter import TreePrettyPrinter
@@ -32,7 +32,7 @@ SYSTEM_DELIMITERS = {
 }
 
 
-def get_grammar(function_names: list[str], properties_names: list[str]) -> nltk.CFG:
+def get_grammar(function_names: Iterable[str], properties_names: Iterable[str]) -> nltk.CFG:
     context_free_grammar = nltk.CFG.fromstring(f"""
     S ->  NEXT_STEP
     NEXT_STEP ->  OPTIONAL_EMPTY JOB OPTIONAL_EMPTY | OPTIONAL_EMPTY JOB OPTIONAL_EMPTY NEXT_OP NEXT_STEP 
@@ -88,7 +88,7 @@ class CallFunction(BaseModel):
 
 
 class ProductParam(BaseModel):
-    payload: ResultFunction | CallFunction | PositionalArg | None = None
+    payload: ResultFunction | CallFunction | PositionalArg
 
 
 T = TypeVar('T')
@@ -99,8 +99,8 @@ class Job(BaseModel, Generic[T]):
 
 
 class Product(BaseModel):
-    l_group: list[ProductParam] = Field(default_factory=list)
-    r_group: list[Job] = Field(default_factory=list)
+    cartesian_operands: list[ProductParam] = Field(default_factory=list)
+    pipeline: "list[Job[Product] | Job[CallFunction]]" = Field(default_factory=list)
 
 
 def tokenizer(body: str, delimiters: set[str]) -> Generator[str]:
@@ -182,8 +182,8 @@ def product_param(tree: nltk.tree.tree.Tree) -> Generator[ProductParam]:
 
 
 def product(tree: nltk.tree.tree.Tree) -> Product:
-    product_params = []
-    jobs: list[Job] = []
+    product_params: list[ProductParam] = []
+    jobs: list[Job[Product] | Job[CallFunction]] = []
     for child in tree:
         match child.label():
             case "PRODUCT_PARAM":
@@ -191,10 +191,10 @@ def product(tree: nltk.tree.tree.Tree) -> Product:
             case "NEXT_STEP":
                 jobs.extend(recurs_search_node(child))
 
-    return Product(l_group=product_params, r_group=jobs)
+    return Product(cartesian_operands=product_params, pipeline=jobs)
 
 
-def recurs_search_node(tree: nltk.tree.tree.Tree) -> Generator[Job]:
+def recurs_search_node(tree: nltk.tree.tree.Tree) -> Generator[Job[Product] | Job[CallFunction]]:
     for child in tree:
         match child.label():
             case "NEXT_STEP":
@@ -207,7 +207,7 @@ def recurs_search_node(tree: nltk.tree.tree.Tree) -> Generator[Job]:
                         yield Job[CallFunction](payload=call_function(child[0]))
 
 
-def lexer(input_tokens: Iterable[str], function_names: list[str], properties_names: list[str]) -> nltk.tree.tree.Tree | None:
+def lexer(input_tokens: Iterable[str], function_names: Iterable[str], properties_names: Iterable[str]) -> nltk.tree.tree.Tree | None:
     grammar = get_grammar(
         function_names=function_names,
         properties_names=properties_names
@@ -218,12 +218,14 @@ def lexer(input_tokens: Iterable[str], function_names: list[str], properties_nam
     return parser.parse_one(input_tokens)
 
 
-def make_ast(source: str, function_names: tuple[str], properties_names: tuple[str]) -> tuple[Context, list[Job]]:
+def make_ast(source: str, function_names: tuple[str], properties_names: tuple[str]) -> tuple[
+    Context, list[Job[Product] | Job[CallFunction]]]:
     system_functions = copy.deepcopy(SYSTEM_FUNCTIONS)
-    tokenized_source = list(tokenizer(source, SYSTEM_DELIMITERS))
-    function_names = list(system_functions.union(function_names))
-    properties_names = list(system_functions.union(properties_names))
-    result = lexer(input_tokens=tokenized_source, function_names=function_names, properties_names=properties_names)
+    result = lexer(
+        input_tokens=list(tokenizer(source, SYSTEM_DELIMITERS)),
+        function_names=list(system_functions.union(function_names)),
+        properties_names=list(system_functions.union(properties_names))
+    )
 
     if not result:
         raise SyntaxError("Invalid pipeline syntax")

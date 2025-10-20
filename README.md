@@ -31,7 +31,7 @@ tasks:
     name: Fetch user
     url: https://httpbin.org/get
     method: get
-    single: false
+    is_singleton: false
 
   - type: http
     id: log_action
@@ -39,7 +39,7 @@ tasks:
     url: https://httpbin.org/post
     method: post
     body: '{"source": "!{{1}}"}'
-    single: false
+    is_singleton: false
 
   - type: pipeline
     id: user_flow
@@ -83,7 +83,7 @@ tasks:
     body: '{"email": "user@example.com"}'
     json_extractor_props:
       token: 'access_token'
-    single: false
+    is_singleton: false
 
   - type: http
     id: profile
@@ -91,7 +91,7 @@ tasks:
     method: get
     headers:
       - ["Authorization", "Bearer !{{1}}"]
-    single: false
+    is_singleton: false
 
   - type: pipeline
     id: auth_flow
@@ -110,13 +110,13 @@ tasks:
     method: get
     json_extractor_props:
       ids: '$.results[*].id'
-    single: false
+    is_singleton: false
 
   - type: http
     id: fetch_item
     url: https://api.example.com/items/!{{1}}
     method: get
-    single: false
+    is_singleton: false
 
   - type: pipeline
     id: bulk_fetch

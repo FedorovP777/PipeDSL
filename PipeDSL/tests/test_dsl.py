@@ -147,8 +147,8 @@ def test_make_ast_product_jobs():
     assert ast == (
         Context(pipeline_uuid=''),
         [
-            Job[Product](payload=Product(l_group=[ProductParam(payload=ResultFunction(name='pipeline_context', property='endpoint'))],
-                                         r_group=[
+            Job[Product](payload=Product(cartesian_operands=[ProductParam(payload=ResultFunction(name='pipeline_context', property='endpoint'))],
+                                         pipeline=[
                                              Job[CallFunction](payload=CallFunction(name='registration', arguments=[PositionalArg(idx=1)])),
                                              Job[CallFunction](
                                                  payload=CallFunction(name='registration', arguments=[PositionalArg(idx=1)]))])),

@@ -10,7 +10,7 @@ tasks:
       - *default_headers
     method: get
     id: series
-    single: false
+    is_singleton: false
     json_extractor_props:
       ids: '$.results[*].id'
       count: 'count'
@@ -22,7 +22,7 @@ tasks:
       - *default_headers
     method: get
     id: series_by_id
-    single: false
+    is_singleton: false
     json_extractor_props:
       id: 'id'
       slug: 'slug'
@@ -35,7 +35,7 @@ tasks:
       - *default_headers
     method: get
     id: seo_template_series_by_id
-    single: false
+    is_singleton: false
 
 
   - type: pipeline
@@ -43,7 +43,7 @@ tasks:
     id: open_series
     pipeline: "series(pipeline_context.start_offset) >> [range(pipeline_context.start_offset,series.count,pipeline_context.page_size)] * [series($1) >> [series.ids] * [series_by_id($1) >> seo_template_series_by_id(series_by_id.id,series_by_id.slug)]]"
     pipeline_context:
-      endpoint: 'https://api.amediateka.tech'
+      endpoint: 'https://api.test.tech'
       start_offset: '0'
       page_size: '60'
 

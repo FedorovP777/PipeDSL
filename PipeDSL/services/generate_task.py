@@ -36,7 +36,7 @@ class YamlTaskReaderService:
         return result["tasks"]
 
     @staticmethod
-    def generate_tasks(config_body: str) -> list[Task[TaskType]]:
+    def generate_tasks(config_body: str) -> list[Task[Pipeline] | Task[HttpRequest]]:
         tasks = YamlTaskReaderService.read_yaml_config(config_body=config_body)
         result = []
 
@@ -47,7 +47,7 @@ class YamlTaskReaderService:
                 http_rps_limit=task.get('http_rps_limit'),
                 pipeline_context=dict(task.get("pipeline_context", {}))
             )))
-            assert result[-1].single == True
+            assert result[-1].is_singleton == True
 
         for task in filter(lambda x: x["type"] == "http", tasks):
             result.append(Task[HttpRequest](**task, payload=HttpRequest(
