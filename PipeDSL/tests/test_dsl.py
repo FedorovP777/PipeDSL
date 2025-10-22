@@ -133,7 +133,6 @@ def test_tokenizer_production():
         "[",
         "]"
     }
-    print(list(tokenizer(r, delimiters)))
     assert list(tokenizer(r, delimiters)) == ['[', 'pipeline_context', '.', 'endpoint', ']', ' ', '*', ' ', '[', 'registration', '(', 'A',
                                               ')', ' ', '>>', ' ', 'registration', '(', 'A', ')', ']']
 

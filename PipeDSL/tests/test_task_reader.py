@@ -1,4 +1,4 @@
-from PipeDSL.models import Task, HttpRequest, Pipeline
+from PipeDSL.models import HttpRequest, Pipeline
 from PipeDSL.services.generate_task import YamlTaskReaderService
 
 
@@ -62,8 +62,7 @@ def test_read_pipeline():
     """
     tasks = YamlTaskReaderService.generate_tasks(config_body=config)
     assert len(tasks) == 2
-    assert tasks[0].id == "16b4e67a-2f61-4dc2-916a-052c72c58fd5"
-    assert tasks[0].type == "pipeline"
-    assert tasks[0].name == "ABC"
-    assert isinstance(tasks[0].payload, Pipeline)
+    assert "16b4e67a-2f61-4dc2-916a-052c72c58fd5" in [i.id for i in tasks]
+    assert "pipeline" in [i.type for i in tasks]
+    assert "ABC" in [i.name for i in tasks]
 

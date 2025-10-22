@@ -121,12 +121,12 @@ def tokenizer(body: str, delimiters: set[str]) -> Generator[str]:
         yield token
 
 
-def get_call_arguments(tree: nltk.tree.tree.Tree) -> list[ResultFunction | CallFunction | PositionalArg]:
+def parse_call_params(tree: nltk.tree.tree.Tree) -> list[ResultFunction | CallFunction | PositionalArg]:
     params = []
     for child in tree:
         match child.label():
             case "FN_PARAMS":
-                params.extend(get_call_arguments(child))
+                params.extend(parse_call_params(child))
             case "PARAM":
                 match child[0].label():
                     case "CALL_FN":
@@ -160,7 +160,7 @@ def call_function(tree: nltk.tree.tree.Tree) -> CallFunction:
             case "FUNCTION":
                 function_name = child.leaves()[0]
             case "FN_PARAMS":
-                function_params = get_call_arguments(child)
+                function_params = parse_call_params(child)
 
     return CallFunction(name=function_name, arguments=function_params)
 
@@ -189,16 +189,16 @@ def product(tree: nltk.tree.tree.Tree) -> Product:
             case "PRODUCT_PARAM":
                 product_params.extend(product_param(child))
             case "NEXT_STEP":
-                jobs.extend(recurs_search_node(child))
+                jobs.extend(traverse_ast(child))
 
     return Product(cartesian_operands=product_params, pipeline=jobs)
 
 
-def recurs_search_node(tree: nltk.tree.tree.Tree) -> Generator[Job[Product] | Job[CallFunction]]:
+def traverse_ast(tree: nltk.tree.tree.Tree) -> Generator[Job[Product] | Job[CallFunction]]:
     for child in tree:
         match child.label():
             case "NEXT_STEP":
-                yield from recurs_search_node(child)
+                yield from traverse_ast(child)
             case "JOB":
                 match child[0].label():
                     case "PRODUCT":
@@ -218,7 +218,7 @@ def lexer(input_tokens: Iterable[str], function_names: Iterable[str], properties
     return parser.parse_one(input_tokens)
 
 
-def make_ast(source: str, function_names: tuple[str], properties_names: tuple[str]) -> tuple[
+def make_ast(source: str, function_names: tuple[str,...], properties_names: tuple[str,...]) -> tuple[
     Context, list[Job[Product] | Job[CallFunction]]]:
     system_functions = copy.deepcopy(SYSTEM_FUNCTIONS)
     result = lexer(
@@ -232,5 +232,5 @@ def make_ast(source: str, function_names: tuple[str], properties_names: tuple[st
 
     logger.debug(TreePrettyPrinter(result, None, ()).text())
     root_context = Context()
-    jobs = list(recurs_search_node(result))
+    jobs = list(traverse_ast(result))
     return root_context, list(jobs)
