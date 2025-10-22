@@ -45,25 +45,33 @@ def test_concat_function():
     assert result == "a"
 
 
-def test_execute_function():
+def test_execute_function_uuid():
     f = CallFunction(name="uuid", arguments=[])
     result = asyncio.run(PipelineExecutor.execute_function({}, {}, f))
     assert result is not None
     assert len(result) == len(str(uuid.uuid4()))
 
 
-def test_execute_function_2():
+def test_execute_function_concat():
     f = CallFunction(name="concat", arguments=[CallFunction(name="uuid", arguments=[])])
     result = asyncio.run(PipelineExecutor.execute_function({}, {}, f))
     assert result is not None
     assert len(result) == len(str(uuid.uuid4()))
 
 
-def test_execute_function_3():
+def test_execute_function_concat_2():
     f = CallFunction(name="concat", arguments=[ResultFunction(name="a", property="_a"), ResultFunction(name="b", property="_b")])
     result = asyncio.run(PipelineExecutor.execute_function({"a": {"_a": "1"}, "b": {"_b": "2"}}, {"a": {"_a": "1"}, "b": {"_b": "2"}}, f))
     assert result is not None
     assert result == "12"
+
+
+def test_execute_function_range():
+    f = CallFunction(name="range", arguments=[ResultFunction(name="pipeline_context", property='a'),
+                                              ResultFunction(name="pipeline_context", property='b'),
+                                              ResultFunction(name="pipeline_context", property='c')])
+    result = asyncio.run(PipelineExecutor.execute_function({}, {"pipeline_context": {"a": [1], "b": [5], "c": [1]}}, f))
+    assert result == [1, 2, 3, 4]
 
 
 def test_resolve_payload_types():

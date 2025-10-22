@@ -1,6 +1,6 @@
 [project]
 name = "PipeDSL"
-version = "0.1.9"
+version = "0.1.10"
 description = ""
 authors = [
     { name = "Your Name", email = "you@example.com" }
@@ -35,3 +35,5 @@ packages = ["PipeDSL/"]
 requires = ["hatchling >= 1.27"]
 build-backend = "hatchling.build"
 
+[project.urls]
+Repository = "https://github.com/FedorovP777/PipeDSL"

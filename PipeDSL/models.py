@@ -14,7 +14,7 @@ class Pipeline(BaseModel):
     pipeline: str
     fetch_strategy: str | None = None
     http_rps_limit: int | None = None
-    pipeline_context: dict[str, str | list[str]]
+    pipeline_context: dict[str, int|  str | list[str] | list[int]]
     ast: tuple[Context, list[Job[Product] | Job[CallFunction]]] | None = None
 
 
