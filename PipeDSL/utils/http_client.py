@@ -1,12 +1,11 @@
 from abc import abstractmethod
 from decimal import Decimal
-from typing import Callable, Awaitable, Generic, Any
+from typing import Callable, Awaitable, Any, Protocol
 
 import aiohttp
 from aiohttp import ClientSession, ClientResponse
 from multidict import istr
 from pydantic import BaseModel
-from typing_extensions import TypeVar
 
 from PipeDSL.models import HttpRequest
 
@@ -25,18 +24,12 @@ class JsonResponse(HttpResponse):
     body: Any
 
 
-RequestExecutorRetType = TypeVar("RequestExecutorRetType")
-ResponseHandlerRetType = TypeVar("ResponseHandlerRetType")
-RequestExecutorType = TypeVar("RequestExecutorType")
-CredentialProviderRetType = TypeVar("CredentialProviderRetType")
-
-
-class RequestExecutor(Generic[RequestExecutorRetType]):
+class RequestExecutor(Protocol):
     @abstractmethod
-    async def execute_request(self, request: HttpRequest) -> RequestExecutorRetType: ...
+    async def execute_request(self, request: HttpRequest) -> Any: ...
 
 
-class AioHttpRequestExecution(RequestExecutor[ClientResponse]):
+class AioHttpRequestExecution:
     def __init__(self, session: ClientSession):
         self.session = session
 
@@ -46,6 +39,10 @@ class AioHttpRequestExecution(RequestExecutor[ClientResponse]):
                 return await self._get(request, self.session)
             case "post":
                 return await self._post(request, self.session)
+            case "put":
+                return await self._put(request, self.session)
+            case "delete":
+                return await self._delete(request, self.session)
         raise NotImplementedError
 
     async def _get(self, request: HttpRequest, session: ClientSession) -> ClientResponse:
@@ -54,11 +51,17 @@ class AioHttpRequestExecution(RequestExecutor[ClientResponse]):
     async def _post(self, request: HttpRequest, session: ClientSession) -> ClientResponse:
         return await session.post(request.url, data=request.body, headers=request.headers, timeout=aiohttp.ClientTimeout(request.timeout))
 
+    async def _delete(self, request: HttpRequest, session: ClientSession) -> ClientResponse:
+        return await session.delete(request.url, data=request.body, headers=request.headers, timeout=aiohttp.ClientTimeout(request.timeout))
 
-class AsyncHttpClient(Generic[ResponseHandlerRetType, RequestExecutorType, CredentialProviderRetType]):
+    async def _put(self, request: HttpRequest, session: ClientSession) -> ClientResponse:
+        return await session.put(request.url, data=request.body, headers=request.headers, timeout=aiohttp.ClientTimeout(request.timeout))
+
+
+class AsyncHttpClient[ResponseHandlerRetType, RequestExecutorType, CredentialProviderRetType]:
     def __init__(
             self,
-            request_executor: RequestExecutor[ClientResponse],
+            request_executor: RequestExecutor,
             response_handler: Callable[[ClientResponse], Awaitable[ResponseHandlerRetType]],
             credential_provider: Callable[[HttpRequest], CredentialProviderRetType] | None = None,
     ):
@@ -67,12 +70,6 @@ class AsyncHttpClient(Generic[ResponseHandlerRetType, RequestExecutorType, Crede
         self.response_handler = response_handler
 
     async def execute_request(self, request: HttpRequest) -> ResponseHandlerRetType:
-
-        if self.credential_provider:
-            credential = self.credential_provider(request)
-        else:
-            credential = None
-
         response: ClientResponse = await self.request_executor.execute_request(request)
         return await self.response_handler(response)
 

@@ -43,8 +43,6 @@ class PipelineTaskBuilder:
         return Task[Pipeline].model_validate({**raw_task, "payload": payload})
 
 
-# =============== Регистратор типов задач ===============
-
 ConcreteTask = Task[HttpRequest] | Task[Pipeline]
 TaskBuilderFn = Callable[[dict[str, Any]], ConcreteTask]
 
