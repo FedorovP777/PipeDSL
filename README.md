@@ -15,14 +15,14 @@ Use PipeDSL to:
 Install the package:
 
 ```bash
-pip install pipedsl
+pip install PipeDSL
 ```
 
 Run a pipeline from a YAML string:
 
 ```python
 import asyncio
-from pipedsl import YamlTaskReader, TaskScheduler
+from PipeDSL import YamlTaskReader, TaskScheduler
 
 config = """
 tasks:
@@ -134,7 +134,7 @@ The syntax `[A] * [B($1)]` means: for each element in `A`, execute `B`, substitu
 | `id` | Yes | Unique identifier (used in DSL expressions) |
 | `name` | No | Human-readable label |
 | `type` | Yes | Either `http` or `pipeline` |
-| `single` | No | If `true` (default), the task runs standalone. If `false`, it can be called from a pipeline. |
+| `is_singleton` | No | If `true` (default), the task runs standalone. If `false`, it can be called from a pipeline. |
 | `url`, `method`, `headers`, `body` | Yes (for `http`) | Standard HTTP request parameters |
 | `json_extractor_props` | No | Maps `{name: JSONPath}` to extract values from JSON responses |
 | `pipeline_context` | No (for `pipeline`) | Key-value store available as `pipeline_context.key` in DSL |
