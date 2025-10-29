@@ -296,6 +296,7 @@ class PipelineExecutor:
             result=consumed_task,
             args=[str(i) for i in args],
         )
+        execution_context[job.payload.name] = {}
         if isinstance(consumed_task, JsonResponse):
             for k, v in sub_task.payload.json_extractor_props.items():
                 execution_context[job.payload.name][k] = json_extend_extractor(v, consumed_task.body)
