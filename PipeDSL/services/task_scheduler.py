@@ -357,7 +357,7 @@ class PipelineExecutor:
     ) -> Any:
 
         if product_args:
-            return product_args[arg.idx - 1]
+            return [product_args[arg.idx - 1]]
 
         raise Exception("Invalid positional argument")
 
